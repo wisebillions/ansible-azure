@@ -1,0 +1,75 @@
+---
+- name: Provision VMs and Install Kubernetes and Calico
+  hosts: localhost
+  tasks:
+    - name: Create Resource Group
+      azure_rm_resourcegroup:
+        name: my-resource-group
+        location: eastus
+
+    - name: Create Virtual Machines
+      azure_rm_virtualmachine:
+        name: "{{ item }}"
+        resource_group: my-resource-group
+        vm_size: Standard_B2s
+        admin_username: ansible
+        admin_password: SecretPassword123!
+        image:
+          offer: UbuntuServer
+          publisher: Canonical
+          sku: '20.04-LTS'
+        assign_public_ip: yes
+      with_items:
+        - my-vm-1
+        - my-vm-2
+        - my-vm-3
+        - my-vm-4
+
+    - name: Wait for VMs to be provisioned
+      local_action:
+        module: wait_for
+        host: "{{ item }}"
+        port: 22
+        state: started
+      with_items:
+        - my-vm-1
+        - my-vm-2
+        - my-vm-3
+        - my-vm-4
+
+    - name: Install dependencies
+      become: yes
+      apt:
+        name:
+          - apt-transport-https
+          - curl
+        state: present
+
+    - name: Add Kubernetes apt repository
+      become: yes
+      apt_repository:
+        repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
+        state: present
+        filename: "kubernetes"
+
+    - name: Install Kubernetes packages
+      become: yes
+      apt:
+        name:
+          - kubeadm
+          - kubelet
+          - kubectl
+        state: present
+
+    - name: Initialize Kubernetes cluster
+      become: yes
+      shell: |
+        kubeadm init --pod-network-cidr=192.168.0.0/16
+        mkdir -p $HOME/.kube
+        cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        chown $(id -u):$(id -g) $HOME/.kube/config
+
+    - name: Install Calico network plugin
+      become: yes
+      shell: |
+        kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
